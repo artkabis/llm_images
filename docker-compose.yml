@@ -1,21 +1,10 @@
 version: "3.9"
 
 # =============================================================
-# Facial Recognition System — Docker Compose (Production)
+# Facial Recognition System — Docker Compose
 # =============================================================
-# Prérequis : Docker Desktop (Linux / macOS / Windows avec WSL2)
-#
-# Webcams USB sur Linux :
-#   cp docker-compose.override.example.yml docker-compose.override.yml
-#   Puis ajuster /dev/videoX dans le fichier override.
-#
-# Webcams USB sur Windows :
-#   Non supportées via Docker Desktop. Utiliser run.py (LOCAL_MODE)
-#   ou scripts/start-dev.ps1 pour accéder aux caméras USB locales.
-#
-# Mode local sans Docker :
-#   python run.py             (Windows / Linux / macOS)
-#   .\scripts\start-dev.ps1  (Windows PowerShell)
+# Webcam USB (Linux) : cp docker-compose.override.example.yml docker-compose.override.yml
+# Windows            : utiliser python run.py (LOCAL_MODE) ou caméras RTSP
 # =============================================================
 
 x-logging: &default-logging
@@ -31,7 +20,7 @@ x-common: &common
 
 services:
 
-  # ── Reverse Proxy ──────────────────────────────────────────
+  # ── Reverse Proxy ──────────────────────────────────────────────
   nginx:
     <<: *common
     image: nginx:1.25-alpine
@@ -42,28 +31,26 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
       - frontend_build:/usr/share/nginx/html/app:ro
-    depends_on:
-      - api
-      - frontend
+    depends_on: [api, frontend]
     healthcheck:
       test: ["CMD", "nginx", "-t"]
       interval: 30s
       timeout: 5s
       retries: 3
 
-  # ── API Backend ────────────────────────────────────────────
+  # ── API Backend ──────────────────────────────────────────────
   api:
     <<: *common
     build:
       context: ./services/api
       dockerfile: Dockerfile
-    expose:
-      - "8000"
+    expose: ["8000"]
     volumes:
       - db_data:/data/db
       - secure_frames:/data/secure_frames
       - audit_logs:/data/audit_logs
       - faiss_index:/data/faiss
+      - active_learning:/data/active_learning
     depends_on:
       redis:
         condition: service_healthy
@@ -73,7 +60,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Celery Worker Haute Priorité ───────────────────────────
+  # ── Celery Workers ─────────────────────────────────────────────
   worker-high:
     <<: *common
     build:
@@ -84,11 +71,9 @@ services:
       - db_data:/data/db
       - secure_frames:/data/secure_frames
       - faiss_index:/data/faiss
-    depends_on:
-      - redis
-      - ml
+      - active_learning:/data/active_learning
+    depends_on: [redis, ml]
 
-  # ── Celery Worker Basse Priorité ──────────────────────────
   worker-low:
     <<: *common
     build:
@@ -99,23 +84,21 @@ services:
       - db_data:/data/db
       - ml_models:/data/models
       - mlflow_data:/mlflow
-    depends_on:
-      - redis
-      - mlflow
+      - active_learning:/data/active_learning
+    depends_on: [redis, mlflow]
 
-  # ── Service ML (PyTorch + InsightFace) ────────────────────
+  # ── Service ML ────────────────────────────────────────────────
   ml:
     <<: *common
     build:
       context: ./services/ml
       dockerfile: Dockerfile
-    expose:
-      - "8001"
+    expose: ["8001"]
     volumes:
       - ml_models:/data/models
       - faiss_index:/data/faiss
       - secure_frames:/data/secure_frames
-    # GPU NVIDIA (optionnel — supprimer si CPU only) :
+      - active_learning:/data/active_learning
     deploy:
       resources:
         reservations:
@@ -129,44 +112,39 @@ services:
       timeout: 10s
       retries: 5
 
-  # ── Service Vidéo (OpenCV) ────────────────────────────────
-  # Webcam USB Linux : voir docker-compose.override.example.yml
-  # Caméras IP/RTSP  : configurer dans config/cameras.yml
+  # ── Service Vidéo ──────────────────────────────────────────────
   video:
     <<: *common
     build:
       context: ./services/video
       dockerfile: Dockerfile
-    expose:
-      - "8002"
+    expose: ["8002"]
     volumes:
       - secure_frames:/data/secure_frames
       - ./config/cameras.yml:/config/cameras.yml:ro
-    depends_on:
-      - redis
-      - ml
+    # Webcam USB Linux : créer docker-compose.override.yml depuis docker-compose.override.example.yml
+    # Windows : les devices /dev/videoX ne sont pas supportés — utiliser RTSP ou python run.py
+    depends_on: [redis, ml]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
       interval: 20s
       timeout: 5s
       retries: 3
 
-  # ── Frontend React (build) ────────────────────────────────
+  # ── Frontend ─────────────────────────────────────────────────
   frontend:
     build:
       context: ./services/frontend
       dockerfile: Dockerfile
     volumes:
       - frontend_build:/app/build
-    profiles:
-      - build
+    profiles: [build]
 
-  # ── Redis ─────────────────────────────────────────────────
+  # ── Redis ────────────────────────────────────────────────────
   redis:
     <<: *common
     image: redis:7-alpine
-    expose:
-      - "6379"
+    expose: ["6379"]
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
@@ -176,22 +154,20 @@ services:
       timeout: 3s
       retries: 5
 
-  # ── MLflow Tracking ───────────────────────────────────────
+  # ── MLflow ────────────────────────────────────────────────
   mlflow:
     <<: *common
     image: ghcr.io/mlflow/mlflow:v2.12.1
-    expose:
-      - "5000"
+    expose: ["5000"]
     volumes:
       - mlflow_data:/mlflow
     command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri /mlflow/mlruns --default-artifact-root /mlflow/artifacts
 
-  # ── Prometheus ────────────────────────────────────────────
+  # ── Prometheus ──────────────────────────────────────────────
   prometheus:
     <<: *common
     image: prom/prometheus:v2.51.0
-    expose:
-      - "9090"
+    expose: ["9090"]
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -199,12 +175,11 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=30d"
 
-  # ── Grafana ───────────────────────────────────────────────
+  # ── Grafana ────────────────────────────────────────────────
   grafana:
     <<: *common
     image: grafana/grafana:10.4.0
-    ports:
-      - "3001:3000"
+    ports: ["3001:3000"]
     volumes:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
@@ -213,18 +188,17 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
 
-  # ── Loki (logs) ───────────────────────────────────────────
+  # ── Loki ────────────────────────────────────────────────────
   loki:
     <<: *common
     image: grafana/loki:2.9.0
-    expose:
-      - "3100"
+    expose: ["3100"]
     volumes:
       - loki_data:/loki
       - ./monitoring/loki/loki.yml:/etc/loki/config.yml:ro
     command: -config.file=/etc/loki/config.yml
 
-  # ── Promtail (collecte logs Docker) ──────────────────────
+  # ── Promtail ───────────────────────────────────────────────
   promtail:
     <<: *common
     image: grafana/promtail:2.9.0
@@ -234,7 +208,6 @@ services:
       - ./monitoring/promtail/promtail.yml:/etc/promtail/config.yml:ro
     command: -config.file=/etc/promtail/config.yml
 
-# ── Volumes ────────────────────────────────────────────────
 volumes:
   db_data:
   ml_models:
@@ -242,6 +215,7 @@ volumes:
   mlflow_data:
   secure_frames:
   audit_logs:
+  active_learning:
   redis_data:
   prometheus_data:
   grafana_data:
