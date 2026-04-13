@@ -1,0 +1,235 @@
+version: "3.9"
+
+# =============================================================
+# Facial Recognition System — Docker Compose (Phase 1 Local)
+# =============================================================
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-common: &common
+  restart: unless-stopped
+  logging: *default-logging
+  env_file: .env
+
+services:
+
+  # ── Reverse Proxy ──────────────────────────────────────────
+  nginx:
+    <<: *common
+    image: nginx:1.25-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - frontend_build:/usr/share/nginx/html/app:ro
+    depends_on:
+      - api
+      - frontend
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── API Backend ────────────────────────────────────────────
+  api:
+    <<: *common
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+    expose:
+      - "8000"
+    volumes:
+      - db_data:/data/db
+      - secure_frames:/data/secure_frames
+      - audit_logs:/data/audit_logs
+      - faiss_index:/data/faiss
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── Celery Worker Haute Priorité ───────────────────────────
+  worker-high:
+    <<: *common
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+    command: celery -A workers.celery_app worker -Q high -c 4 --loglevel=info
+    volumes:
+      - db_data:/data/db
+      - secure_frames:/data/secure_frames
+      - faiss_index:/data/faiss
+    depends_on:
+      - redis
+      - ml
+
+  # ── Celery Worker Basse Priorité ──────────────────────────
+  worker-low:
+    <<: *common
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+    command: celery -A workers.celery_app worker -Q low -c 2 --loglevel=info
+    volumes:
+      - db_data:/data/db
+      - ml_models:/data/models
+      - mlflow_data:/mlflow
+    depends_on:
+      - redis
+      - mlflow
+
+  # ── Service ML (PyTorch + InsightFace) ────────────────────
+  ml:
+    <<: *common
+    build:
+      context: ./services/ml
+      dockerfile: Dockerfile
+    expose:
+      - "8001"
+    volumes:
+      - ml_models:/data/models
+      - faiss_index:/data/faiss
+      - secure_frames:/data/secure_frames
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+
+  # ── Service Vidéo (OpenCV) ────────────────────────────────
+  video:
+    <<: *common
+    build:
+      context: ./services/video
+      dockerfile: Dockerfile
+    expose:
+      - "8002"
+    volumes:
+      - secure_frames:/data/secure_frames
+      - ./config/cameras.yml:/config/cameras.yml:ro
+    devices:
+      - /dev/video0:/dev/video0   # Webcam USB (ajuster si besoin)
+    privileged: false
+    depends_on:
+      - redis
+      - ml
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+
+  # ── Frontend React (build) ────────────────────────────────
+  frontend:
+    build:
+      context: ./services/frontend
+      dockerfile: Dockerfile
+    volumes:
+      - frontend_build:/app/build
+    profiles:
+      - build
+
+  # ── Redis ─────────────────────────────────────────────────
+  redis:
+    <<: *common
+    image: redis:7-alpine
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── MLflow Tracking ───────────────────────────────────────
+  mlflow:
+    <<: *common
+    image: ghcr.io/mlflow/mlflow:v2.12.1
+    expose:
+      - "5000"
+    volumes:
+      - mlflow_data:/mlflow
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri /mlflow/mlruns --default-artifact-root /mlflow/artifacts
+
+  # ── Prometheus ────────────────────────────────────────────
+  prometheus:
+    <<: *common
+    image: prom/prometheus:v2.51.0
+    expose:
+      - "9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+
+  # ── Grafana ───────────────────────────────────────────────
+  grafana:
+    <<: *common
+    image: grafana/grafana:10.4.0
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+
+  # ── Loki (logs) ───────────────────────────────────────────
+  loki:
+    <<: *common
+    image: grafana/loki:2.9.0
+    expose:
+      - "3100"
+    volumes:
+      - loki_data:/loki
+      - ./monitoring/loki/loki.yml:/etc/loki/config.yml:ro
+    command: -config.file=/etc/loki/config.yml
+
+  # ── Promtail (collecte logs Docker) ──────────────────────
+  promtail:
+    <<: *common
+    image: grafana/promtail:2.9.0
+    volumes:
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./monitoring/promtail/promtail.yml:/etc/promtail/config.yml:ro
+    command: -config.file=/etc/promtail/config.yml
+
+# ── Volumes ────────────────────────────────────────────────
+volumes:
+  db_data:
+  ml_models:
+  faiss_index:
+  mlflow_data:
+  secure_frames:
+  audit_logs:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  frontend_build:
