@@ -1,7 +1,21 @@
 version: "3.9"
 
 # =============================================================
-# Facial Recognition System — Docker Compose (Phase 1 Local)
+# Facial Recognition System — Docker Compose (Production)
+# =============================================================
+# Prérequis : Docker Desktop (Linux / macOS / Windows avec WSL2)
+#
+# Webcams USB sur Linux :
+#   cp docker-compose.override.example.yml docker-compose.override.yml
+#   Puis ajuster /dev/videoX dans le fichier override.
+#
+# Webcams USB sur Windows :
+#   Non supportées via Docker Desktop. Utiliser run.py (LOCAL_MODE)
+#   ou scripts/start-dev.ps1 pour accéder aux caméras USB locales.
+#
+# Mode local sans Docker :
+#   python run.py             (Windows / Linux / macOS)
+#   .\scripts\start-dev.ps1  (Windows PowerShell)
 # =============================================================
 
 x-logging: &default-logging
@@ -101,6 +115,7 @@ services:
       - ml_models:/data/models
       - faiss_index:/data/faiss
       - secure_frames:/data/secure_frames
+    # GPU NVIDIA (optionnel — supprimer si CPU only) :
     deploy:
       resources:
         reservations:
@@ -115,6 +130,8 @@ services:
       retries: 5
 
   # ── Service Vidéo (OpenCV) ────────────────────────────────
+  # Webcam USB Linux : voir docker-compose.override.example.yml
+  # Caméras IP/RTSP  : configurer dans config/cameras.yml
   video:
     <<: *common
     build:
@@ -125,9 +142,6 @@ services:
     volumes:
       - secure_frames:/data/secure_frames
       - ./config/cameras.yml:/config/cameras.yml:ro
-    devices:
-      - /dev/video0:/dev/video0   # Webcam USB (ajuster si besoin)
-    privileged: false
     depends_on:
       - redis
       - ml
