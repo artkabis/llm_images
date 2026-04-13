@@ -1,22 +1,16 @@
-# =============================================================
-# docker-compose.override.yml — Webcam USB Linux
-# =============================================================
-# Ce fichier active le passage de la webcam USB au conteneur vidéo.
-# Il n'est nécessaire QUE sur Linux avec des caméras USB locales.
+# docker-compose.override.yml — Webcam USB Linux uniquement
 #
-# Utilisation :
+# Usage :
 #   cp docker-compose.override.example.yml docker-compose.override.yml
-#   Éditer /dev/videoX selon votre configuration (lsusb / v4l2-ctl --list-devices)
-#   docker compose up -d
+#   Adapter /dev/videoX selon vos caméras (ls /dev/video*)
 #
-# Caméras IP/RTSP : configurer uniquement config/cameras.yml, pas besoin d'override.
-# Windows        : utiliser run.py ou scripts/start-dev.ps1 (LOCAL_MODE).
-# =============================================================
-
-version: "3.9"
+# NON compatible Windows : les devices /dev/videoX n'existent pas sous Windows.
+# Utiliser python run.py (LOCAL_MODE) ou des caméras RTSP pour Docker sur Windows.
 
 services:
   video:
     devices:
-      - /dev/video0:/dev/video0   # Webcam principale
-      # - /dev/video2:/dev/video2 # Caméra supplémentaire
+      - /dev/video0:/dev/video0
+      # Ajouter d'autres caméras USB si nécessaire :
+      # - /dev/video2:/dev/video2
+      # - /dev/video4:/dev/video4
