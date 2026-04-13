@@ -1,0 +1,69 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Data (ne jamais committer les données biométriques)
+data/raw/
+data/processed/
+data/active_learning/pending/
+data/active_learning/labeled/
+data/train/
+data/val/
+data/test/
+
+# Modèles (versionnés via MLflow/DVC)
+models/
+*.pth
+*.pt
+*.onnx
+*.bin
+
+# FAISS index
+*.faiss
+*.index
+
+# MLflow
+mlruns/
+mlflow.db
+
+# Logs
+logs/
+*.log
+audit_logs/
+secure_frames/
+
+# Node
+node_modules/
+services/frontend/build/
+services/frontend/dist/
+.npm/
+
+# Docker
+.docker/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# DVC
+/data/.dvc/tmp/
