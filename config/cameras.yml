@@ -1,0 +1,34 @@
+# Configuration des caméras — à adapter à votre infrastructure
+# Conforme à AGENT_VIDEO.md §5.3
+#
+# Types supportés :
+#   - rtsp : caméra IP via RTSP (url obligatoire)
+#   - usb  : webcam locale (device_id obligatoire)
+
+cameras:
+  - id: cam_entree_principale
+    type: rtsp
+    url: rtsp://admin:password@192.168.1.100:554/stream1
+    fps_target: 15
+    resolution_min: [640, 480]
+    zone: "Entrée principale"
+    active: true
+
+  - id: cam_parking
+    type: rtsp
+    url: rtsp://admin:password@192.168.1.101:554/stream1
+    fps_target: 10
+    resolution_min: [320, 240]
+    zone: "Parking"
+    active: true
+
+  - id: webcam_bureau
+    type: usb
+    device_id: 0
+    fps_target: 25
+    resolution_min: [640, 480]
+    zone: "Bureau direction"
+    active: true
+
+# Ajouter autant de caméras que nécessaire.
+# Chaque caméra démarre un worker thread dédié.
