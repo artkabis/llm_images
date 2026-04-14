@@ -1,0 +1,154 @@
+{
+  "title": "ML Model Monitoring",
+  "tags": ["ml", "facial-recognition"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "FAR (False Acceptance Rate)",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "targets": [{ "expr": "facial_recognition_far * 100", "legendFormat": "FAR %" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 3,
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 0.1 },
+          { "color": "red", "value": 0.5 }
+        ]}
+      }}
+    },
+    {
+      "id": 2, "type": "stat", "title": "FRR (False Rejection Rate)",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "targets": [{ "expr": "facial_recognition_frr * 100", "legendFormat": "FRR %" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 3,
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 1 },
+          { "color": "red", "value": 2 }
+        ]}
+      }}
+    },
+    {
+      "id": 3, "type": "stat", "title": "EER (Equal Error Rate)",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "targets": [{ "expr": "facial_recognition_eer * 100", "legendFormat": "EER %" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 3,
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 0.5 },
+          { "color": "red", "value": 1 }
+        ]}
+      }}
+    },
+    {
+      "id": 4, "type": "stat", "title": "TAR (True Acceptance Rate)",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "targets": [{ "expr": "facial_recognition_tar * 100", "legendFormat": "TAR %" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 3,
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "red", "value": null },
+          { "color": "yellow", "value": 98 },
+          { "color": "green", "value": 99 }
+        ]}
+      }}
+    },
+    {
+      "id": 5, "type": "gauge", "title": "Drift Score",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "targets": [{ "expr": "facial_recognition_drift_score", "legendFormat": "Drift" }],
+      "fieldConfig": { "defaults": { "unit": "none", "min": 0, "max": 0.2,
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 0.05 },
+          { "color": "red", "value": 0.1 }
+        ]}
+      }}
+    },
+    {
+      "id": 6, "type": "stat", "title": "File Active Learning",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "targets": [{ "expr": "facial_recognition_al_queue_size", "legendFormat": "En attente" }],
+      "fieldConfig": { "defaults": { "unit": "none",
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 100 },
+          { "color": "red", "value": 500 }
+        ]}
+      }}
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Evolution FAR / FRR / EER",
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 4 },
+      "targets": [
+        { "expr": "facial_recognition_far * 100", "legendFormat": "FAR %" },
+        { "expr": "facial_recognition_frr * 100", "legendFormat": "FRR %" },
+        { "expr": "facial_recognition_eer * 100", "legendFormat": "EER %" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 3 } }
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "Drift Score (seuil 0.05)",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 4 },
+      "targets": [
+        { "expr": "facial_recognition_drift_score", "legendFormat": "Drift" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none",
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "red", "value": 0.05 }
+        ]},
+        "custom": { "thresholdsStyle": { "mode": "line" } }
+      }}
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "Identifications par resultat",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        { "expr": "rate(facial_recognition_total{result=\"authorized\"}[5m])", "legendFormat": "Autorises" },
+        { "expr": "rate(facial_recognition_total{result=\"intruder\"}[5m])", "legendFormat": "Intrus" },
+        { "expr": "rate(facial_recognition_total{result=\"unknown\"}[5m])", "legendFormat": "Inconnus" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "Labels Active Learning",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        { "expr": "rate(facial_recognition_al_labeled_total[10m]) * 600", "legendFormat": "{{action}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } }
+    },
+    {
+      "id": 11, "type": "stat", "title": "Fine-tunings deployes",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 20 },
+      "targets": [{ "expr": "facial_recognition_finetuning_total{outcome=\"deployed\"}", "legendFormat": "Deployes" }],
+      "fieldConfig": { "defaults": { "unit": "none" } }
+    },
+    {
+      "id": 12, "type": "stat", "title": "Rollbacks",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 20 },
+      "targets": [{ "expr": "facial_recognition_finetuning_total{outcome=\"rolled_back\"}", "legendFormat": "Rollbacks" }],
+      "fieldConfig": { "defaults": { "unit": "none",
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "red", "value": 3 }
+        ]}
+      }}
+    },
+    {
+      "id": 13, "type": "stat", "title": "Profils enroles",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 20 },
+      "targets": [{ "expr": "facial_recognition_profiles_total", "legendFormat": "Profils" }],
+      "fieldConfig": { "defaults": { "unit": "none" } }
+    },
+    {
+      "id": 14, "type": "stat", "title": "Cameras actives",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 20 },
+      "targets": [{ "expr": "facial_recognition_cameras_active", "legendFormat": "Cameras" }],
+      "fieldConfig": { "defaults": { "unit": "none" } }
+    }
+  ]
+}
