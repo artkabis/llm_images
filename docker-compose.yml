@@ -1,10 +1,10 @@
 version: "3.9"
 
 # =============================================================
-# Facial Recognition System — Docker Compose
+# Facial Recognition System - Docker Compose
 # =============================================================
 # Webcam USB (Linux) : cp docker-compose.override.example.yml docker-compose.override.yml
-# Windows            : utiliser python run.py (LOCAL_MODE) ou caméras RTSP
+# Windows            : utiliser python run.py (LOCAL_MODE) ou cameras RTSP
 # =============================================================
 
 x-logging: &default-logging
@@ -20,7 +20,7 @@ x-common: &common
 
 services:
 
-  # ── Reverse Proxy ──────────────────────────────────────────────
+  # -- Reverse Proxy --
   nginx:
     <<: *common
     image: nginx:1.25-alpine
@@ -38,7 +38,7 @@ services:
       timeout: 5s
       retries: 3
 
-  # ── API Backend ──────────────────────────────────────────────
+  # -- API Backend --
   api:
     <<: *common
     build:
@@ -60,7 +60,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Celery Workers ─────────────────────────────────────────────
+  # -- Celery Workers --
   worker-high:
     <<: *common
     build:
@@ -87,7 +87,7 @@ services:
       - active_learning:/data/active_learning
     depends_on: [redis, mlflow]
 
-  # ── Service ML ────────────────────────────────────────────────
+  # -- Service ML --
   ml:
     <<: *common
     build:
@@ -112,7 +112,7 @@ services:
       timeout: 10s
       retries: 5
 
-  # ── Service Vidéo ──────────────────────────────────────────────
+  # -- Service Video --
   video:
     <<: *common
     build:
@@ -122,8 +122,6 @@ services:
     volumes:
       - secure_frames:/data/secure_frames
       - ./config/cameras.yml:/config/cameras.yml:ro
-    # Webcam USB Linux : créer docker-compose.override.yml depuis docker-compose.override.example.yml
-    # Windows : les devices /dev/videoX ne sont pas supportés — utiliser RTSP ou python run.py
     depends_on: [redis, ml]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
@@ -131,7 +129,7 @@ services:
       timeout: 5s
       retries: 3
 
-  # ── Frontend ─────────────────────────────────────────────────
+  # -- Frontend --
   frontend:
     build:
       context: ./services/frontend
@@ -140,7 +138,7 @@ services:
       - frontend_build:/app/build
     profiles: [build]
 
-  # ── Redis ────────────────────────────────────────────────────
+  # -- Redis --
   redis:
     <<: *common
     image: redis:7-alpine
@@ -154,7 +152,7 @@ services:
       timeout: 3s
       retries: 5
 
-  # ── MLflow ────────────────────────────────────────────────
+  # -- MLflow --
   mlflow:
     <<: *common
     image: ghcr.io/mlflow/mlflow:v2.12.1
@@ -163,19 +161,49 @@ services:
       - mlflow_data:/mlflow
     command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri /mlflow/mlruns --default-artifact-root /mlflow/artifacts
 
-  # ── Prometheus ──────────────────────────────────────────────
+  # -- Prometheus --
   prometheus:
     <<: *common
     image: prom/prometheus:v2.51.0
     expose: ["9090"]
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts.rules.yml:/etc/prometheus/alerts.rules.yml:ro
       - prometheus_data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+    depends_on: [alertmanager]
 
-  # ── Grafana ────────────────────────────────────────────────
+  # -- Alertmanager --
+  alertmanager:
+    <<: *common
+    image: prom/alertmanager:v0.27.0
+    expose: ["9093"]
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+
+  # -- Node Exporter (metriques OS : CPU / RAM / disque / reseau) --
+  node-exporter:
+    <<: *common
+    image: prom/node-exporter:v1.7.0
+    expose: ["9100"]
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    pid: host
+
+  # -- Grafana --
   grafana:
     <<: *common
     image: grafana/grafana:10.4.0
@@ -187,8 +215,9 @@ services:
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
+    depends_on: [prometheus]
 
-  # ── Loki ────────────────────────────────────────────────────
+  # -- Loki --
   loki:
     <<: *common
     image: grafana/loki:2.9.0
@@ -198,7 +227,7 @@ services:
       - ./monitoring/loki/loki.yml:/etc/loki/config.yml:ro
     command: -config.file=/etc/loki/config.yml
 
-  # ── Promtail ───────────────────────────────────────────────
+  # -- Promtail --
   promtail:
     <<: *common
     image: grafana/promtail:2.9.0
@@ -220,4 +249,5 @@ volumes:
   prometheus_data:
   grafana_data:
   loki_data:
+  alertmanager_data:
   frontend_build:
