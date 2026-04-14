@@ -1,6 +1,6 @@
 """
-Service API — Point d'entrée FastAPI
-Conforme à AGENT_BACKEND.md
+Service API - Point d'entree FastAPI
+Conforme a AGENT_BACKEND.md
 """
 import asyncio
 import json
@@ -16,8 +16,12 @@ from prometheus_client import make_asgi_app
 from core.config import get_settings
 from core.database import init_db
 from core.eventbus import bus
-from core.security import require_role
+from core.metrics import (
+    CAMERAS_ACTIVE, MODEL_FAR, MODEL_FRR, MODEL_EER, MODEL_TAR,
+    MODEL_DRIFT, MODEL_PROFILES, MODEL_INFO,
+)
 from routers import profiles, identify, alerts, auth, monitoring, review
+from routers.ml_proxy import router as ml_router
 
 log = structlog.get_logger()
 settings = get_settings()
@@ -27,14 +31,16 @@ LOCAL_MODE = os.getenv("LOCAL_MODE", "false").lower() == "true"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    log.info("Démarrage du service API", env=settings.app_env, local_mode=LOCAL_MODE)
+    log.info("Demarrage du service API", env=settings.app_env, local_mode=LOCAL_MODE)
     await init_db()
-    # EventBus : None → InMemoryEventBus, redis_url → Redis
     await bus.init(redis_url=None if LOCAL_MODE else settings.redis_url)
     app.state.ws_manager = ConnectionManager()
-    log.info("Service API prêt")
+    # Initialisation des metriques statiques
+    MODEL_INFO.info({"name": "buffalo_l", "version": "1.0"})
+    CAMERAS_ACTIVE.set(0)
+    log.info("Service API pret")
     yield
-    log.info("Service API arrêté")
+    log.info("Service API arrete")
 
 
 app = FastAPI(
@@ -45,7 +51,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ── Middleware ────────────────────────────────────────────────
+# -- Middleware --
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
@@ -55,10 +61,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Prometheus ────────────────────────────────────────────────
+# -- Prometheus /metrics --
 app.mount("/metrics", make_asgi_app())
 
-# ── Routers ───────────────────────────────────────────────────
+# -- Routers --
 PREFIX = settings.api_v1_prefix
 app.include_router(auth.router,       prefix=f"{PREFIX}/auth",       tags=["Auth"])
 app.include_router(profiles.router,   prefix=f"{PREFIX}/profiles",   tags=["Profiles"])
@@ -66,12 +72,13 @@ app.include_router(identify.router,   prefix=f"{PREFIX}/identify",   tags=["Iden
 app.include_router(alerts.router,     prefix=f"{PREFIX}/alerts",     tags=["Alerts"])
 app.include_router(review.router,     prefix=f"{PREFIX}/review",     tags=["Review"])
 app.include_router(monitoring.router, prefix=f"{PREFIX}/monitoring", tags=["Monitoring"])
+app.include_router(ml_router,         prefix=f"{PREFIX}/ml",         tags=["ML"])
 
 
-# ── WebSocket Manager ─────────────────────────────────────────
+# -- WebSocket Manager --
 
 class ConnectionManager:
-    """Gère les connexions WebSocket actives par canal."""
+    """Gere les connexions WebSocket actives par canal."""
 
     def __init__(self):
         self._connections: dict[str, list[WebSocket]] = {}
@@ -79,7 +86,6 @@ class ConnectionManager:
     async def connect(self, ws: WebSocket, channel: str):
         await ws.accept()
         self._connections.setdefault(channel, []).append(ws)
-        log.debug("WS connecté", channel=channel)
 
     def disconnect(self, ws: WebSocket, channel: str):
         conns = self._connections.get(channel, [])
@@ -97,11 +103,10 @@ class ConnectionManager:
             self._connections[channel].remove(ws)
 
 
-# ── WebSocket endpoints ───────────────────────────────────────
+# -- WebSocket endpoints --
 
 @app.websocket("/ws/alerts")
 async def ws_alerts(websocket: WebSocket):
-    """Stream alertes temps réel (toutes caméras)."""
     manager: ConnectionManager = websocket.app.state.ws_manager
     await manager.connect(websocket, "alerts")
     try:
@@ -114,7 +119,7 @@ async def ws_alerts(websocket: WebSocket):
 
 @app.websocket("/ws/metrics")
 async def ws_metrics(websocket: WebSocket):
-    """Stream métriques système toutes les 5 secondes."""
+    """Stream metriques systeme toutes les 5 secondes."""
     manager: ConnectionManager = websocket.app.state.ws_manager
     await manager.connect(websocket, "metrics")
     try:
@@ -133,7 +138,6 @@ async def ws_metrics(websocket: WebSocket):
 
 @app.websocket("/ws/cameras/{camera_id}")
 async def ws_camera(websocket: WebSocket, camera_id: str):
-    """Stream détections pour une caméra spécifique."""
     manager: ConnectionManager = websocket.app.state.ws_manager
     await manager.connect(websocket, f"camera_{camera_id}")
     try:
@@ -145,7 +149,7 @@ async def ws_camera(websocket: WebSocket, camera_id: str):
         manager.disconnect(websocket, f"camera_{camera_id}")
 
 
-# ── Internal broadcast (video service → EventBus en LOCAL_MODE) ──
+# -- Internal broadcast (video service -> EventBus en LOCAL_MODE) --
 
 class BroadcastPayload(BaseModel):
     channel: str
@@ -154,16 +158,11 @@ class BroadcastPayload(BaseModel):
 
 @app.post("/internal/broadcast", include_in_schema=False)
 async def internal_broadcast(payload: BroadcastPayload):
-    """
-    Endpoint interne utilisé par le service vidéo en LOCAL_MODE.
-    Publie les détections via l'EventBus (Redis ou in-memory).
-    Non exposé dans la doc Swagger.
-    """
     await bus.publish(payload.channel, payload.data)
     return {"ok": True}
 
 
-# ── Health ────────────────────────────────────────────────────
+# -- Health --
 
 @app.get(f"{PREFIX}/health", tags=["Health"])
 async def health():
