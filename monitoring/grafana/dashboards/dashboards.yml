@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: facial-recognition
+    orgId: 1
+    folder: "Facial Recognition"
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
