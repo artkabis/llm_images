@@ -1,0 +1,120 @@
+{
+  "title": "System Resources",
+  "tags": ["system", "infrastructure"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "CPU %",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "targets": [{ "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)", "legendFormat": "CPU" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "max": 100,
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 75 },
+          { "color": "red", "value": 85 }
+        ]}
+      }}
+    },
+    {
+      "id": 2, "type": "stat", "title": "RAM %",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "targets": [{ "expr": "(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100", "legendFormat": "RAM" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "max": 100,
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 70 },
+          { "color": "red", "value": 80 }
+        ]}
+      }}
+    },
+    {
+      "id": 3, "type": "stat", "title": "Disque %",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "targets": [{ "expr": "(node_filesystem_size_bytes{mountpoint=\"/\",fstype!=\"tmpfs\"} - node_filesystem_free_bytes{mountpoint=\"/\",fstype!=\"tmpfs\"}) / node_filesystem_size_bytes{mountpoint=\"/\",fstype!=\"tmpfs\"} * 100", "legendFormat": "Disque" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "max": 100,
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 70 },
+          { "color": "red", "value": 85 }
+        ]}
+      }}
+    },
+    {
+      "id": 4, "type": "stat", "title": "Services actifs",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "targets": [{ "expr": "count(up == 1)", "legendFormat": "Up" }],
+      "fieldConfig": { "defaults": { "unit": "none",
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "red", "value": null },
+          { "color": "green", "value": 1 }
+        ]}
+      }}
+    },
+    {
+      "id": 5, "type": "stat", "title": "Services en panne",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "targets": [{ "expr": "count(up == 0) or vector(0)", "legendFormat": "Down" }],
+      "fieldConfig": { "defaults": { "unit": "none",
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "red", "value": 1 }
+        ]}
+      }}
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "CPU Usage (%)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        { "expr": "100 - (avg by(instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)", "legendFormat": "CPU {{instance}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100,
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 75 },
+          { "color": "red", "value": 85 }
+        ]}
+      }}
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "RAM Usage (%)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        { "expr": "(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100", "legendFormat": "RAM" },
+        { "expr": "node_memory_Cached_bytes / node_memory_MemTotal_bytes * 100", "legendFormat": "Cache" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 } }
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "Trafic reseau (B/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        { "expr": "rate(node_network_receive_bytes_total{device!~\"lo|veth.*\"}[5m])", "legendFormat": "RX {{device}}" },
+        { "expr": "rate(node_network_transmit_bytes_total{device!~\"lo|veth.*\"}[5m])", "legendFormat": "TX {{device}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps" } }
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "Latence API p50/p99 (s)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, rate(http_request_duration_seconds_bucket{job=\"api\"}[5m]))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job=\"api\"}[5m]))", "legendFormat": "p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 10, "type": "table", "title": "Etat des services",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 20 },
+      "targets": [{ "expr": "up", "legendFormat": "{{job}}", "instant": true }],
+      "fieldConfig": { "defaults": { "unit": "none",
+        "mappings": [
+          { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+        ]
+      }}
+    }
+  ]
+}
