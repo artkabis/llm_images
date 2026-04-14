@@ -1,207 +1,140 @@
-# CLAUDE.md — Instructions prioritaires pour Claude Code
+# CLAUDE.md — Vision AI · Facial Recognition System
 
-> Ce fichier est lu en priorité par Claude Code avant toute action sur ce dépôt.
-
-## 1. Repo & branche
-
-- **Repo unique** : `artkabis/llm_images` — ne jamais toucher `multi-vendor-pim`
-- **Branche de dev** : `claude/facial-recognition-system-bLZRZ`
-- Push toujours sur cette branche, PR vers `main` sur demande explicite
+## Project
+Enterprise facial recognition for video surveillance: real-time detection, authorized vs.
+intruder classification, active learning loop with human-in-the-loop fine-tuning.
+Stack: InsightFace (ArcFace 512-d) + FAISS + FastAPI + Celery + React + MLflow + Docker.
 
 ---
 
-## 2. Sources de vérité — Lire AVANT tout code
+## Repository (non-negotiable)
+- **Repo**: `artkabis/llm_images` — **never** touch `multi-vendor-pim`
+- **Branch**: `claude/facial-recognition-system-bLZRZ` — push here, never to `main`
+- **MCP push strategy**: max 2 files per `push_files` call; load schema + call in same turn
 
-| Fichier | Contenu |
-|---|---|
-| `docs/agents/AGENT_ML_IA.md` | ML, embeddings, fine-tuning, métriques FAR/FRR/EER/TAR |
-| `docs/agents/AGENT_VIDEO.md` | Ingestion vidéo, multi-caméras, qualité frames |
-| `docs/agents/AGENT_SECURITE.md` | Alertes 4 niveaux, RBAC, chiffrement AES-256, audit |
-| `docs/agents/AGENT_BACKEND.md` | API REST, WebSocket, Celery, endpoints |
-| `docs/agents/AGENT_INFRA.md` | Docker, monitoring, migration local→VPS |
-| `docs/agents/AGENT_DATA.md` | Dataset, augmentation, GDPR |
-| `docs/agents/AGENT_FRONTEND.md` | UI pages, RBAC frontend, dark mode |
-| `CAHIER_DES_CHARGES.md` | Architecture globale, roadmap phases |
-
----
-
-## 3. Règles GitHub MCP (critique — lire attentivement)
-
-Le serveur MCP GitHub se déconnecte toutes les ~2-5 min.
-
-### Stratégie anti-timeout
-- **Toujours utiliser `push_files`** (pas de SHA requis, multi-fichiers)
-- **Maximum 2 fichiers par appel `push_files`** pour éviter le stream idle timeout
-- Charger le schéma via `ToolSearch` ET appeler le tool dans la **même réponse**
-- Préparer tout le contenu des fichiers AVANT d'appeler les tools GitHub
-- En cas de déconnexion : `ToolSearch` immédiatement à la reconnexion, sans texte inutile
-- Ne jamais écrire de longs blocs de texte avant un appel tool (cause de timeout)
-
-### Ordre d'exécution correct
-```
-1. ToolSearch (charge schéma) — même réponse que l'appel suivant si possible
-2. push_files avec 1-2 fichiers max
-3. Répéter pour chaque batch
-```
+## Agent docs — source of truth
+@docs/agents/AGENT_ML_IA.md
+@docs/agents/AGENT_VIDEO.md
+@docs/agents/AGENT_SECURITE.md
+@docs/agents/AGENT_BACKEND.md
+@docs/agents/AGENT_INFRA.md
+@docs/agents/AGENT_DATA.md
+@docs/agents/AGENT_FRONTEND.md
 
 ---
 
-## 4. Compatibilité cross-platform (obligatoire)
+## Services & ports
+| Service  | Port | Notes |
+|----------|------|-------|
+| api      | 8000 | FastAPI + WebSocket + /internal/broadcast |
+| ml       | 8001 | InsightFace inference, FAISS, fine-tuning |
+| celery   | —    | Worker: fine_tune_model, evaluate_model |
+| video    | —    | Camera ingestion (RTSP / USB) |
+| frontend | 5173 | React + Vite |
+| redis    | 6379 | Docker only — absent in LOCAL_MODE |
+| mlflow   | 5050 | Experiment tracking |
 
-| OS | Mode | Démarrage |
-|---|---|---|
-| Windows | Local (no Docker) | `python run.py` ou `.\scripts\start-dev.ps1` |
-| Linux/macOS | Local | `python run.py` ou `./scripts/start-dev.sh` |
-| Linux/macOS | Docker | `docker compose up -d` |
-
-### Variables d'environnement clés
+## Quick start
 ```bash
-LOCAL_MODE=true           # Sans Redis, sans Docker (EventBus in-memory)
-INSIGHTFACE_CTX_ID=-1    # CPU (-1) ou GPU (0)
-API_SERVICE_URL=http://localhost:8000
-ML_SERVICE_URL=http://localhost:8001
+# Linux / macOS — Docker Compose
+docker compose up --build
+
+# Windows — no Docker required
+.\scripts\start-dev.ps1
+
+# Single entry point (any platform)
+python run.py
 ```
 
-### Pattern publish_fn (VideoService)
+---
+
+## Cross-platform rules
 ```python
-# LOCAL_MODE → HTTP vers /internal/broadcast
-# Docker     → redis.publish() direct
-publish_fn = _build_publish_fn()  # services/video/main.py
-worker = CameraWorker(config=cam_config, publish_fn=publish_fn)
+IS_WINDOWS = sys.platform == "win32"
+LOCAL_MODE = os.getenv("LOCAL_MODE", "false").lower() == "true"
 ```
+- USB camera: Windows → `int` + `cv2.CAP_DSHOW`; Linux → `/dev/videoX` or `int` + V4L2
+- LOCAL_MODE: no Redis → `InMemoryEventBus`; Celery broker = `memory://`
+- `pathlib.Path` for all filesystem paths — no hardcoded POSIX strings
+- `publish_fn` callback injected into `CameraWorker`; never import Redis directly in video
 
 ---
 
-## 5. Pipeline Active Learning & Fine-tuning (AGENT_ML_IA.md §5)
-
+## Active learning pipeline
 ```
-Frame incertaine (score 70-85%)
-    │
-    ▼
-[ReviewItem en DB] ← camera_id, confidence, candidates, frame.jpg
-    │
-    ▼ (opérateur humain)
-[Review.tsx] ← 5 actions : confirmed / corrected / new_profile / intruder / rejected
-    │
-    ▼
-[POST /api/v1/review/{id}/label] ← compte labels, retourne task_id
-    │ (si labeled_count % trigger_threshold == 0)
-    ▼
-[Celery: fine_tune_model] ← POST vers ML /fine_tune
-    │
-    ▼
-[ML: mise à jour centroids FAISS + évaluation FAR/FRR/EER]
-    ├─ improvement >= min_pct → deployed=True, version++
-    └─ dégradation → rolled_back=True, anciens centroids conservés
-    │
-    ▼
-[MLflow] ← far_before/after, frr_before/after, eer, improvement_pct, n_samples
+Frame scored 0.70–0.85  →  ReviewItem(status=pending)  →  /review/queue
+Human labels one of 5 actions:
+  confirmed | corrected | new_profile | intruder | rejected
+Every FINE_TUNE_THRESHOLD labels → Celery `fine_tune_model` task
+  └─ ML /fine_tune: extract embeddings, update FAISS centroids per profile
+  └─ Evaluate FAR/FRR/EER before & after
+  └─ improvement ≥ MIN_IMPROVEMENT_PCT → deploy; else rollback
+  └─ MLflow logs: far_before/after, frr_before/after, eer_before/after,
+               improvement_pct, n_samples, tar, outcome
 ```
 
-### Seuils configurables (PUT /api/v1/review/training/config)
-```
-ML_THRESHOLD_SUSPECT=0.70     # En dessous → inconnu
-ML_THRESHOLD_AUTHORIZED=0.85  # Au-dessus → autorisé
-ML_ACTIVE_LEARNING_TRIGGER=50 # Labels pour déclencher fine-tuning
-ML_AUTO_DEPLOY=true
-ML_MIN_IMPROVEMENT_PCT=1.0
-```
+## ML evaluation targets
+| Metric | Target | Alert threshold |
+|--------|--------|-----------------|
+| FAR    | < 0.1% | > 0.5%          |
+| FRR    | < 1%   | > 2%            |
+| EER    | < 0.5% | > 1%            |
+| TAR    | > 99%  | < 98%           |
+| Drift  | < 0.05 | > 0.05          |
 
 ---
 
-## 6. Structure du projet
+## Critical code patterns
 
-```
-llm_images/
-├── CLAUDE.md                    ← CE FICHIER
-├── CAHIER_DES_CHARGES.md
-├── README.md
-├── DEMARRAGE.md
-├── run.py                       ← Launcher cross-platform (python run.py)
-├── docker-compose.yml
-├── docker-compose.override.example.yml  ← Webcam Linux
-├── .env.example / .env.local
-├── config/cameras.yml
-├── services/
-│   ├── api/                     ← FastAPI :8000
-│   │   ├── core/                ← config, database, security, eventbus
-│   │   ├── routers/             ← profiles, identify, alerts, review, auth, monitoring
-│   │   └── workers/             ← celery_app, tasks
-│   ├── ml/                      ← ML FastAPI :8001
-│   │   ├── face_engine.py       ← RetinaFace + ArcFace 512d
-│   │   ├── embedding_store.py   ← FAISS wrapper
-│   │   ├── metrics.py           ← Prometheus
-│   │   └── main.py              ← /identify /enroll /fine_tune /model/*
-│   ├── video/                   ← Video FastAPI :8002
-│   │   ├── camera_manager.py    ← CameraWorker cross-platform
-│   │   └── main.py              ← publish_fn LOCAL/Docker
-│   └── frontend/                ← React :3000
-│       └── src/pages/           ← Dashboard, Alerts, Profiles, Review,
-│                                   MonitoringML, MonitoringSystem, Login
-├── docs/agents/                 ← Instructions agents IA par domaine
-├── monitoring/                  ← Prometheus, Grafana, Loki, Promtail
-└── scripts/
-    ├── start-dev.sh             ← Bash (Linux/macOS)
-    └── start-dev.ps1            ← PowerShell (Windows)
-```
-
----
-
-## 7. Patterns de code
-
-### Router FastAPI
+### Event bus (never bypass)
 ```python
-from core.database import get_db, ReviewItem, ReviewStatus
-from core.security import require_role
-from core.config import get_settings
+# Always use EventBusAdapter — never import redis directly
+from core.eventbus import EventBusAdapter
+bus = EventBusAdapter()          # auto-selects Redis or InMemoryEventBus
+await bus.publish(channel, data) # async
+bus.publish_sync(channel, data)  # thread-safe (video workers)
+```
 
-router = APIRouter()
-
-@router.get("/endpoint")
-async def my_endpoint(
-    db: AsyncSession = Depends(get_db),
-    user=Depends(require_role("operator")),  # admin | operator | viewer
-):
+### RBAC on every route
+```python
+@router.get("/resource")
+async def endpoint(user=Depends(require_role("viewer"))):
     ...
+# Hierarchy: viewer < operator < admin
+# GET → viewer | POST/PATCH → operator | DELETE/rollback/config-write → admin
 ```
 
-### EventBus
+### InsightFace inference
 ```python
-# Publication
-await bus.publish("channel:alerts", {"level": "CRITICAL", ...})
-# Souscription WebSocket
-async for raw in bus.subscribe("channel:alerts"):
-    await websocket.send_text(raw)
+app = FaceAnalysis(name="buffalo_l")
+app.prepare(ctx_id=-1 if LOCAL_MODE else 0)  # -1 = CPU
+embedding = app.get(img)[0].embedding        # 512-d float32
+# Always L2-normalize before FAISS IndexFlatIP (= cosine similarity)
 ```
 
 ---
 
-## 8. Sécurité
-
-- **JWT** : mémoire uniquement, jamais localStorage
-- **RBAC** : viewer < operator < admin — `require_role("min_role")`
-- **Embeddings** : chiffrés AES-256, ne jamais loguer les vecteurs bruts
-- **GDPR** : DELETE /enroll/{id} supprime FAISS + images + logs
-
----
-
-## 9. Métriques ML cibles (AGENT_ML_IA.md §7)
-
-| Métrique | Objectif | Description |
-|---|---|---|
-| FAR | < 0.1% | False Acceptance Rate |
-| FRR | < 1% | False Rejection Rate |
-| EER | minimiser | Equal Error Rate |
-| TAR | > 99% | True Acceptance Rate @ FAR=0.1% |
-| Drift | < 0.05 | Dérive distribution embeddings |
+## Security non-negotiables
+- Credentials in env vars only — never in code or committed files
+- AES-256 encryption for stored embeddings
+- Full audit log on every recognition event and label action
+- RBAC enforced on **every** API route — zero unauthenticated endpoints
+- No credentials in logs; mask tokens in error messages
 
 ---
 
-## 10. Checklist avant chaque push
+## Path-specific rules
+@.claude/rules/ml-inference.md
+@.claude/rules/api-design.md
+@.claude/rules/frontend.md
 
-- [ ] Code testé cross-platform (Windows path + Linux path)
-- [ ] Imports cohérents avec le style du projet (`from core.xxx` pas `from ..xxx`)
-- [ ] Pas de dépendance Redis en LOCAL_MODE
-- [ ] Métriques Prometheus exposées pour chaque nouveau service
-- [ ] RBAC respecté sur tous les endpoints sensibles
-- [ ] CLAUDE.md à jour si nouveau feature ajouté
+---
+
+## Commit & push checklist
+- [ ] Branch: `claude/facial-recognition-system-bLZRZ` only
+- [ ] README.md updated for every new user-visible feature
+- [ ] Cross-platform: `pathlib.Path`, no hardcoded `/dev/video*`, no bare Redis in LOCAL_MODE
+- [ ] `require_role()` dependency on every new API route
+- [ ] No credentials, tokens, or secrets in committed files
+- [ ] MLflow metrics logged for any training/evaluation change
+- [ ] Drift detection deque updated after each recognition batch
