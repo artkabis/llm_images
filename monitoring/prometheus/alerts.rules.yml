@@ -1,0 +1,133 @@
+groups:
+
+  - name: system_resources
+    interval: 30s
+    rules:
+
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 75
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "CPU eleve ({{ $labels.instance }})"
+          description: "CPU a {{ $value | printf \"%.1f\" }}%"
+
+      - alert: CriticalCPUUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "CPU critique ({{ $labels.instance }})"
+          description: "CPU a {{ $value | printf \"%.1f\" }}%"
+
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 70
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "RAM elevee ({{ $labels.instance }})"
+          description: "RAM a {{ $value | printf \"%.1f\" }}%"
+
+      - alert: CriticalMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 80
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "RAM critique ({{ $labels.instance }})"
+          description: "RAM a {{ $value | printf \"%.1f\" }}%"
+
+      - alert: HighDiskUsage
+        expr: (node_filesystem_size_bytes{fstype!~"tmpfs|devtmpfs"} - node_filesystem_free_bytes{fstype!~"tmpfs|devtmpfs"}) / node_filesystem_size_bytes{fstype!~"tmpfs|devtmpfs"} * 100 > 70
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Disque eleve ({{ $labels.mountpoint }})"
+          description: "{{ $value | printf \"%.1f\" }}% utilise"
+
+      - alert: CriticalDiskUsage
+        expr: (node_filesystem_size_bytes{fstype!~"tmpfs|devtmpfs"} - node_filesystem_free_bytes{fstype!~"tmpfs|devtmpfs"}) / node_filesystem_size_bytes{fstype!~"tmpfs|devtmpfs"} * 100 > 85
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Disque critique ({{ $labels.mountpoint }})"
+          description: "{{ $value | printf \"%.1f\" }}% utilise"
+
+      - alert: HighNetworkTraffic
+        expr: rate(node_network_receive_bytes_total{device!="lo"}[5m]) + rate(node_network_transmit_bytes_total{device!="lo"}[5m]) > 8e7
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Trafic reseau eleve"
+          description: "{{ $value | humanize }}B/s sur {{ $labels.device }}"
+
+  - name: services
+    interval: 30s
+    rules:
+
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Service {{ $labels.job }} indisponible"
+          description: "Ne repond plus depuis 1 min"
+
+      - alert: HighAPILatency
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="api"}[5m])) > 0.3
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Latence API p99 elevee"
+          description: "p99 = {{ $value | printf \"%.3f\" }}s"
+
+      - alert: CriticalAPILatency
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="api"}[5m])) > 0.5
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Latence API p99 critique"
+          description: "p99 = {{ $value | printf \"%.3f\" }}s"
+
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{job="api",status=~"5.."}[5m]) / rate(http_requests_total{job="api"}[5m]) > 0.05
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Taux d erreur API eleve"
+          description: "{{ $value | printf \"%.1f\" }}% erreurs 5xx"
+
+  - name: ml_model
+    interval: 60s
+    rules:
+
+      - alert: ModelDrift
+        expr: facial_recognition_drift_score > 0.05
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Derive du modele ML detectee"
+          description: "Drift = {{ $value | printf \"%.4f\" }}"
+
+      - alert: HighFalseAcceptanceRate
+        expr: facial_recognition_far > 0.005
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "FAR critique - faux positifs"
+          description: "FAR = {{ $value | printf \"%.4f\" }}"
+
+      - alert: HighFalseRejectionRate
+        expr: facial_recognition_frr > 0.02
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "FRR eleve - trop de rejets"
+          description: "FRR = {{ $value | printf \"%.4f\" }}"
+
+      - alert: LargeALQueue
+        expr: facial_recognition_al_queue_size > 500
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "File Active Learning saturee"
+          description: "{{ $value }} frames en attente"
