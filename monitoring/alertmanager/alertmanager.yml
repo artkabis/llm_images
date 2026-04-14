@@ -1,0 +1,39 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: [alertname, severity]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: log-receiver
+  routes:
+    - matchers: [severity="critical"]
+      receiver: log-receiver
+      repeat_interval: 1h
+      continue: true
+    - matchers: [severity="warning"]
+      receiver: log-receiver
+      repeat_interval: 4h
+
+receivers:
+  - name: log-receiver
+    # Alertes logues stdout -> Loki via Promtail
+    # Pour activer Slack, decommenter :
+    # slack_configs:
+    #   - api_url: '${SLACK_WEBHOOK_URL}'
+    #     channel: '#alerts-facial-recognition'
+    #     title: '[{{ .Status | toUpper }}] {{ .CommonAnnotations.summary }}'
+    #     text: '{{ .CommonAnnotations.description }}'
+    # Pour activer email, decommenter :
+    # email_configs:
+    #   - to: 'ops@votre-domaine.fr'
+    #     from: 'alertmanager@votre-domaine.fr'
+    #     smarthost: 'smtp.votre-domaine.fr:587'
+    #     auth_username: '${SMTP_USER}'
+    #     auth_password: '${SMTP_PASSWORD}'
+
+inhibit_rules:
+  - source_matchers: [severity="critical"]
+    target_matchers: [severity="warning"]
+    equal: [alertname, instance]
