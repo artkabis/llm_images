@@ -1,0 +1,16 @@
+{
+  "env": {
+    "LOCAL_MODE": "true",
+    "INSIGHTFACE_CTX_ID": "-1",
+    "ML_SERVICE_URL": "http://localhost:8001",
+    "API_SERVICE_URL": "http://localhost:8000"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m py_compile *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)"
+    ]
+  }
+}
